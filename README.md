@@ -1,1 +1,1 @@
-# SLC-GQIDS-GetTableParameters
+# GetElementTable
