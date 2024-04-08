@@ -21,6 +21,8 @@
 			<Value><![CDATA[[Project:GetElementTable_1]]]></Value>
 			<!--<Param type="debug">true</Param>-->
 			<Message></Message>
+			<Param type="preCompile">true</Param>
+			<Param type="libraryName">GQI-GetElementTable</Param>
 		</Exe>
 	</Script>
 </DMSScript>

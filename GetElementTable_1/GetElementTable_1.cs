@@ -8,6 +8,8 @@ namespace GetElementTable_1
     using Newtonsoft.Json.Linq;
     using Skyline.DataMiner.Analytics.GenericInterface;
     using Skyline.DataMiner.Automation;
+    using Skyline.DataMiner.Net;
+    using Skyline.DataMiner.Net.Helper;
     using Skyline.DataMiner.Net.Messages;
     using Skyline.DataMiner.Net.Serialization;
 
@@ -60,93 +62,41 @@ namespace GetElementTable_1
 
         public GQIPage GetNextPage(GetNextPageInputArgs args)
         {
+
             var rows = new List<GQIRow>();
 
-            GetLiteElementInfo getLiteElementMessage = new GetLiteElementInfo(false)
-            {
-                DataMinerID = Convert.ToInt32(dmaId),
-                ElementID = Convert.ToInt32(elementId),
-            };
-
-            var elementsInfo = _dms.SendMessages(getLiteElementMessage).Cast<LiteElementInfoEvent>().ToList();
-
-            foreach (var element in elementsInfo)
-            {
-                List<GQICell> cells = new List<GQICell>();
-                string elementKey = element.DataMinerID + "/" + element.ElementID;
-
-                if(element.DataMinerID == Convert.ToInt32(dmaId) && element.ElementID == Convert.ToInt32(elementId))
-                {
-                    cells.Add(new GQICell() { Value = elementKey });
-                    cells.Add(new GQICell() { Value = element.Name });
-
-                    foreach(int column in columnIds)
-                    {
-                        GetParameterMessage getParameterMessage = new GetParameterMessage(element.DataMinerID, element.ElementID, column);
-                        var response = (GetParameterResponseMessage)_dms.SendMessage(getParameterMessage);
-
-                        cells.Add(new GQICell() { Value = response.Value.DoubleValue, DisplayValue = response.Value.DoubleValue + " " + protocolInfo.FindParameter(column).Units });
-                    }
-
-                }
-
-                GQIRow myRow = new GQIRow(elementKey, cells.ToArray());
-                rows.Add(myRow);
-            }
-
-            return new GQIPage(rows.ToArray())
-            {
-                HasNextPage = false,
-            };
-
-            /*
             try
             {
-                var testElementInfo = new GetLiteElementInfo
+                var elementWithTableRequest = new GetLiteElementInfo
                 {
                     ProtocolName = "Skyline Squad Task Manager",
                     ProtocolVersion = "Production",
                 };
 
-                var someResponse = _dms.SendMessages(new DMSMessage[] { testElementInfo });
+                var elementWithTableResponse = _dms.SendMessages(new DMSMessage[] { elementWithTableRequest });
 
-                foreach (var response in someResponse.Select(x => (LiteElementInfoEvent)x))
+                foreach(var response in elementWithTableResponse.Select(x => (LiteElementInfoEvent)x))
                 {
-                    var outputConfigTable = GetTable(_dms, response, Convert.ToInt32(tableId));
-                    GetOutputMcsTableRows(rows, response, outputConfigTable);
-                }
+                    var outputConfigTable = GetTable(_dms, response, 100);
+                    GetAllLayoutsTableRows(rows, response, outputConfigTable);
 
-                // if no MCS in the system, gather MCM data
-                if (rows.Count == 0)
-                {
-                    var mcmResponses = _dms.SendMessages(new DMSMessage[] { mcmRequest });
-                    foreach (var response in mcmResponses.Select(x => (LiteElementInfoEvent)x))
-                    {
-                        var encoderConfigTable = GetTable(_dms, response, (int)McmTableId.DeviceEncoderConfig);
-                        GetOutputMcmTableRows(rows, response, encoderConfigTable);
-                    }
                 }
             }
             catch (Exception e)
             {
-                CreateDebugRow(rows, $"exception: {e}");
+                CreateDebugRow(rows, $"Exception: {e}");
             }
 
             return new GQIPage(rows.ToArray())
             {
                 HasNextPage = false,
             };
-            */
 
         }
 
         public OnArgumentsProcessedOutputArgs OnArgumentsProcessed(OnArgumentsProcessedInputArgs args)
         {
-            _columns = new List<GQIColumn>
-            {
-                new GQIStringColumn("First Column test"),
-                new GQIStringColumn("Second Column test"),
-            };
+            _columns = new List<GQIColumn>();
 
             dmaId = args.GetArgumentValue(dmaIdArgument);
             elementId = args.GetArgumentValue(elementIdArgument);
@@ -164,12 +114,25 @@ namespace GetElementTable_1
             GetProtocolMessage getProtocolMessage = new GetProtocolMessage(protocol, version);
             protocolInfo = (GetProtocolInfoResponseMessage)_dms.SendMessage(getProtocolMessage);
 
-            foreach(int column in columnIds)
+            if (columnIds.IsNullOrEmpty())
             {
-                string columnName = protocolInfo.GetParameterName(column);
-                _columns.Add(new GQIDoubleColumn(columnName));
-            }
+                var allColumnIds = protocolInfo.Parameters.Select(p => p.ID).ToList();
 
+                foreach (int column in allColumnIds)
+                {
+                    // This is breaking because the R and W columns have the same exact name
+                    string columnName = protocolInfo.GetParameterName(column);
+                    _columns.Add(new GQIStringColumn(columnName));
+                }
+            }
+            else
+            {
+                foreach (int column in columnIds)
+                {
+                    string columnName = protocolInfo.GetParameterName(column);
+                    _columns.Add(new GQIStringColumn(columnName)); // Things start breaking here when the values in the column are not strings!
+                }
+            }
             return new OnArgumentsProcessedOutputArgs();
         }
 
@@ -179,85 +142,114 @@ namespace GetElementTable_1
             return new OnInitOutputArgs();
         }
 
-        //public static object[][] GetTable(GQIDMS _dms,, LiteElementInfoEvent response, int tableId)
-        //{
-        //    var partialTableRequest = new GetPartialTableMessage
-        //    {
-        //        DataMinerID = response.DataMinerID,
-        //        ElementID = response.ElementID,
-        //        ParameterID = tableId,
-        //    };
+        public static object[][] GetTable(GQIDMS _dms, LiteElementInfoEvent response, int tableId)
+        {
+            var partialTableRequest = new GetPartialTableMessage
+            {
+                DataMinerID = response.DataMinerID,
+                ElementID = response.ElementID,
+                ParameterID = tableId,
+            };
 
-        //    var messageResponse = _dms.SendMessage(partialTableRequest) as ParameterChangeEventMessage;
-        //    if(messageResponse.NewValue.ArrayValue != null && messageResponse.NewValue.ArrayValue.Length > 0)
-        //    {
-        //        return BuildRows(messageResponse.NewValue.ArrayValue);
-        //    }
-        //    else
-        //    {
-        //        return new object[0][];
-        //    }
-        //}
-        
-        //public static object[][] BuildRows(ParameterValue[] columns)
-        //{
-        //    int length1 = columns.Length;
-        //    int length2 = 0;
-        //    if (length1 > 0)
-        //        length2 = columns[0].ArrayValue.Length;
-        //    object[][] objArray;
-        //    if (length1 > 0 && length2 > 0)
-        //    {
-        //        objArray = new object[length2][];
-        //        for (int index = 0; index < length2; ++index)
-        //            objArray[index] = new object[length1];
-        //    }
-        //    else
-        //    {
-        //        objArray = new object[0][];
-        //    }
+            var messageResponse = _dms.SendMessage(partialTableRequest) as ParameterChangeEventMessage;
+            if (messageResponse.NewValue.ArrayValue != null && messageResponse.NewValue.ArrayValue.Length > 0)
+            {
+                return BuildRows(messageResponse.NewValue.ArrayValue);
+            }
+            else
+            {
+                return new object[0][];
+            }
+        }
 
-        //    for (int index1 = 0; index1 < length1; ++index1)
-        //    {
-        //        ParameterValue[] arrayValue = columns[index1].ArrayValue;
-        //        for (int index2 = 0; index2 < length2; ++index2)
-        //            objArray[index2][index1] = arrayValue[index2].IsEmpty ? (object)null : arrayValue[index2].ArrayValue[0].InteropValue;
-        //    }
+        public static object[][] BuildRows(ParameterValue[] columns)
+        {
+            int length1 = columns.Length;
+            int length2 = 0;
+            if (length1 > 0)
+                length2 = columns[0].ArrayValue.Length;
+            object[][] objArray;
+            if (length1 > 0 && length2 > 0)
+            {
+                objArray = new object[length2][];
+                for (int index = 0; index < length2; ++index)
+                    objArray[index] = new object[length1];
+            }
+            else
+            {
+                objArray = new object[0][];
+            }
 
-        //    return objArray;
-        //}
+            for (int index1 = 0; index1 < length1; ++index1)
+            {
+                ParameterValue[] arrayValue = columns[index1].ArrayValue;
+                for (int index2 = 0; index2 < length2; ++index2)
+                    objArray[index2][index1] = arrayValue[index2].IsEmpty ? (object)null : arrayValue[index2].ArrayValue[0].InteropValue;
+            }
 
-        //private static void CreateDebugRow(List<GQIRow> rows, string message)
-        //{
-        //    var debugCells = new[]
-        //    {
-        //        new GQICell { Value = message },
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null},
-        //        new GQICell { Value = null},
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null },
-        //        new GQICell { Value = null},
-        //        new GQICell { Value = null},
-        //        new GQICell { Value = null},
-        //        new GQICell { Value = null},
-        //        new GQICell { Value = null},
-        //    };
+            return objArray;
+        }
 
-        //    var row = new GQIRow(debugCells);
-        //    rows.Add(row);
-        //}
+        private void GetAllLayoutsTableRows(List<GQIRow> rows, LiteElementInfoEvent response, object[][] allLayoutsTable)
+        {
+            for (int i = 0; i < allLayoutsTable.Length; i++)
+            {
+                var deviceAllLayoutsRow = allLayoutsTable[i];
+
+                var cells = new List<GQICell>();
+
+                // j < the number of columnIds passed
+                // This is also breaking because even though the column names are being added correctly, the content of the column is being added in order rather than the specific tables.
+
+                for(int j = 0; j < columnIds.Count; j++)
+                {
+                    cells.Add(new GQICell { Value = deviceAllLayoutsRow[j] });
+                }
+
+                var elementID = new ElementID(response.DataMinerID, response.ElementID);
+                var elementMetadata = new ObjectRefMetadata { Object = elementID };
+                var rowMetadata = new GenIfRowMetadata(new[] { elementMetadata });
+
+                var row = new GQIRow(cells.ToArray())
+                {
+                    Metadata = rowMetadata,
+                };
+
+                rows.Add(row);
+            }
+        }
+
+        private static void CreateDebugRow(List<GQIRow> rows, string message)
+        {
+            var debugCells = new[]
+            {
+                new GQICell { Value = message },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+                new GQICell { Value = null },
+            };
+
+            var row = new GQIRow(debugCells);
+            rows.Add(row);
+        }
     }
 }
