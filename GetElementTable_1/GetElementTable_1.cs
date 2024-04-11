@@ -10,6 +10,7 @@ namespace GetElementTable_1
     using Skyline.DataMiner.Analytics.GenericInterface;
     using Skyline.DataMiner.Automation;
     using Skyline.DataMiner.Net;
+    using Skyline.DataMiner.Net.Exceptions;
     using Skyline.DataMiner.Net.Helper;
     using Skyline.DataMiner.Net.Messages;
     using Skyline.DataMiner.Net.Serialization;
@@ -22,53 +23,24 @@ namespace GetElementTable_1
 
         private GQIStringArgument dmaIdArgument = new GQIStringArgument("DMA ID") { IsRequired = true };
         private GQIStringArgument elementIdArgument = new GQIStringArgument("Element ID") { IsRequired = true };
-        private GQIStringArgument tableIdArgument = new GQIStringArgument("Table ID") { IsRequired = true };
-        private GQIStringArgument columnsIdsArguments = new GQIStringArgument("Columns IDs") { IsRequired = false }; // ;-separated list of column ids
+        private GQIStringArgument tableIdArgument = new GQIStringArgument("Table ID") { IsRequired = false };
+        // private GQIStringListArgument tableArg;
 
         private string dmaId;
         private string elementId;
         private string tableId;
-        private List<int> columnIds;
 
         private List<GQIColumn> _columns;
 
-        public GQIColumn[] GetColumns()
+        public OnInitOutputArgs OnInit(OnInitInputArgs args)
         {
-            return _columns.ToArray();
+            _dms = args.DMS;
+            return new OnInitOutputArgs();
         }
 
         public GQIArgument[] GetInputArguments()
         {
-            return new GQIArgument[] { dmaIdArgument, elementIdArgument, tableIdArgument, columnsIdsArguments };
-        }
-
-        public GQIPage GetNextPage(GetNextPageInputArgs args)
-        {
-            var rows = new List<GQIRow>();
-
-            try
-            {
-                GetLiteElementInfo getLiteElementInfo = new GetLiteElementInfo
-                {
-                    DataMinerID = Convert.ToInt32(dmaId),
-                    ElementID = Convert.ToInt32(elementId),
-                };
-
-                var elementInfoResponse = (LiteElementInfoEvent)_dms.SendMessage(getLiteElementInfo);
-
-                var outputConfigTable = GetTable(_dms, elementInfoResponse, Convert.ToInt32(tableId));
-                GetAllLayoutsTableRows(rows, elementInfoResponse, outputConfigTable);
-                CreateDebugRow(rows, "Testing");
-            }
-            catch (Exception e)
-            {
-                CreateDebugRow(rows, $"Exception: {e}");
-            }
-
-            return new GQIPage(rows.ToArray())
-            {
-                HasNextPage = false,
-            };
+            return new GQIArgument[] { dmaIdArgument, elementIdArgument, tableIdArgument };
         }
 
         public OnArgumentsProcessedOutputArgs OnArgumentsProcessed(OnArgumentsProcessedInputArgs args)
@@ -78,24 +50,58 @@ namespace GetElementTable_1
             dmaId = args.GetArgumentValue(dmaIdArgument);
             elementId = args.GetArgumentValue(elementIdArgument);
             tableId = args.GetArgumentValue(tableIdArgument);
-            columnIds = args.GetArgumentValue(columnsIdsArguments).Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries).Select(Int32.Parse).ToList();
 
-            var elementIdMessage = new GetElementByIDMessage
+            try
             {
-                DataMinerID = Convert.ToInt32(dmaId),
-                ElementID = Convert.ToInt32(elementId),
-            };
+                var elementIdMessage = new GetElementByIDMessage
+                {
+                    DataMinerID = Convert.ToInt32(dmaId),
+                    ElementID = Convert.ToInt32(elementId),
+                };
 
-            var elementInfo = (ElementInfoEventMessage)_dms.SendMessage(elementIdMessage);
+                var elementInfo = (ElementInfoEventMessage)_dms.SendMessage(elementIdMessage);
 
-            var protocol = elementInfo.Protocol;
-            var version = elementInfo.ProtocolVersion;
+                var protocol = elementInfo.Protocol;
+                var version = elementInfo.ProtocolVersion;
 
-            GetProtocolMessage getProtocolMessage = new GetProtocolMessage(protocol, version);
-            var protocolInfo = (GetProtocolInfoResponseMessage)_dms.SendMessage(getProtocolMessage);
+                GetProtocolMessage getProtocolMessage = new GetProtocolMessage(protocol, version);
+                var protocolInfo = (GetProtocolInfoResponseMessage)_dms.SendMessage(getProtocolMessage);
 
-            if (columnIds.IsNullOrEmpty())
-            {
+                // Keep above this line.
+
+                var tableParamIds = new List<int>();
+
+                // check every param to find the tableParams
+
+                /*
+                foreach (var param in protocolInfo.AllParameters)
+                {
+                    if (param != null && param.IsTable)
+                    {
+                        tableParamIds.Add(Convert.ToInt32(param.ID));
+                    }
+                }
+
+                // I should NOT be looking through all the params in the tableParamIds automatically,
+
+                // The user SHOULD be selecting the table, THEN display the table
+
+
+                foreach (var param in tableParamIds)
+                {
+                    var allColumnIds = protocolInfo.FindParameter(param).TableColumnDefinitions;
+                    foreach (var column in allColumnIds)
+                    {
+                        if (column == null)
+                        {
+                            continue;
+                        }
+                        string columnName = protocolInfo.GetParameterName(column.ParameterID);
+                        _columns.Add(new GQIStringColumn(columnName));
+                    }
+                }
+                */
+
                 var table = protocolInfo.FindParameter(Convert.ToInt32(tableId));
 
                 if (table != null && table.IsTable)
@@ -114,22 +120,47 @@ namespace GetElementTable_1
                     }
                 }
             }
-            else
+            catch (DataMinerElementUnavailableException)
             {
-                foreach (int column in columnIds)
-                {
-                    string columnName = protocolInfo.GetParameterName(column);
-                    _columns.Add(new GQIStringColumn(columnName));
-                }
+                // What is the correct type of log for this????
+                throw new DataMinerElementUnavailableException("Unable to reach Element");
             }
 
             return new OnArgumentsProcessedOutputArgs();
         }
 
-        public OnInitOutputArgs OnInit(OnInitInputArgs args)
+        public GQIColumn[] GetColumns()
         {
-            _dms = args.DMS;
-            return new OnInitOutputArgs();
+            return _columns.ToArray();
+        }
+
+        public GQIPage GetNextPage(GetNextPageInputArgs args)
+        {
+            var rows = new List<GQIRow>();
+
+            try
+            {
+                GetLiteElementInfo getLiteElementInfo = new GetLiteElementInfo
+                {
+                    DataMinerID = Convert.ToInt32(dmaId),
+                    ElementID = Convert.ToInt32(elementId),
+                };
+
+                var elementInfoResponse = (LiteElementInfoEvent)_dms.SendMessage(getLiteElementInfo);
+
+                var outputConfigTable = GetTable(_dms, elementInfoResponse, Convert.ToInt32(tableId));
+                GetAllLayoutsTableRows(rows, outputConfigTable);
+                CreateDebugRow(rows, "Testing");
+            }
+            catch (Exception e)
+            {
+                CreateDebugRow(rows, $"Exception: {e}");
+            }
+
+            return new GQIPage(rows.ToArray())
+            {
+                HasNextPage = false,
+            };
         }
 
         public static object[][] GetTable(GQIDMS dms, LiteElementInfoEvent response, int tableId)
@@ -180,24 +211,6 @@ namespace GetElementTable_1
             return objArray;
         }
 
-        private void GetAllLayoutsTableRows(List<GQIRow> rows, LiteElementInfoEvent response, object[][] allLayoutsTable)
-        {
-            for (int i = 0; i < allLayoutsTable.Length; i++)
-            {
-                var deviceAllLayoutsRow = allLayoutsTable[i];
-                var cells = new List<GQICell>();
-
-                for(int j = 0; j < deviceAllLayoutsRow.Length; j++)
-                {
-                    cells.Add(new GQICell { Value = Convert.ToString( deviceAllLayoutsRow[j] )});
-                }
-
-                var row = new GQIRow(cells.ToArray());
-
-                rows.Add(row);
-            }
-        }
-
         private static void CreateDebugRow(List<GQIRow> rows, string message)
         {
             var debugCells = new[]
@@ -229,6 +242,24 @@ namespace GetElementTable_1
 
             var row = new GQIRow(debugCells);
             rows.Add(row);
+        }
+
+        private void GetAllLayoutsTableRows(List<GQIRow> rows, object[][] allLayoutsTable)
+        {
+            for (int i = 0; i < allLayoutsTable.Length; i++)
+            {
+                var deviceAllLayoutsRow = allLayoutsTable[i];
+                var cells = new List<GQICell>();
+
+                for(int j = 0; j < deviceAllLayoutsRow.Length; j++)
+                {
+                    cells.Add(new GQICell { Value = Convert.ToString( deviceAllLayoutsRow[j] )});
+                }
+
+                var row = new GQIRow(cells.ToArray());
+
+                rows.Add(row);
+            }
         }
     }
 }
