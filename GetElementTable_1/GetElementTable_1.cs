@@ -86,7 +86,7 @@ namespace GetElementTable_1
             {
                 throw new DataMinerElementUnavailableException("Unable to reach Element");
             }
-            catch (FormatException e)
+            catch (FormatException)
             {
                 throw new ArgumentException(message: $"Input was not in the correct format. Example: DMA ID: 477, Element ID: 178");
             }
