@@ -19,12 +19,10 @@ namespace GetElementTable_1
     [GQIMetaData(Name = "Get Element Table")]
     public class MyDataSource : IGQIDataSource, IGQIInputArguments, IGQIOnInit
     {
+        private readonly GQIStringArgument dmaIdArgument = new GQIStringArgument("DMA ID") { IsRequired = true };
+        private readonly GQIStringArgument elementIdArgument = new GQIStringArgument("Element ID") { IsRequired = true };
+        private readonly GQIStringArgument tableIdArgument = new GQIStringArgument("Table ID") { IsRequired = false };
         private GQIDMS _dms;
-
-        private GQIStringArgument dmaIdArgument = new GQIStringArgument("DMA ID") { IsRequired = true };
-        private GQIStringArgument elementIdArgument = new GQIStringArgument("Element ID") { IsRequired = true };
-        private GQIStringArgument tableIdArgument = new GQIStringArgument("Table ID") { IsRequired = false };
-        // private GQIStringListArgument tableArg;
 
         private string dmaId;
         private string elementId;
@@ -50,7 +48,6 @@ namespace GetElementTable_1
             dmaId = args.GetArgumentValue(dmaIdArgument);
             elementId = args.GetArgumentValue(elementIdArgument);
             tableId = args.GetArgumentValue(tableIdArgument);
-
             try
             {
                 var elementIdMessage = new GetElementByIDMessage
@@ -66,41 +63,6 @@ namespace GetElementTable_1
 
                 GetProtocolMessage getProtocolMessage = new GetProtocolMessage(protocol, version);
                 var protocolInfo = (GetProtocolInfoResponseMessage)_dms.SendMessage(getProtocolMessage);
-
-                // Keep above this line.
-
-                var tableParamIds = new List<int>();
-
-                // check every param to find the tableParams
-
-                /*
-                foreach (var param in protocolInfo.AllParameters)
-                {
-                    if (param != null && param.IsTable)
-                    {
-                        tableParamIds.Add(Convert.ToInt32(param.ID));
-                    }
-                }
-
-                // I should NOT be looking through all the params in the tableParamIds automatically,
-
-                // The user SHOULD be selecting the table, THEN display the table
-
-
-                foreach (var param in tableParamIds)
-                {
-                    var allColumnIds = protocolInfo.FindParameter(param).TableColumnDefinitions;
-                    foreach (var column in allColumnIds)
-                    {
-                        if (column == null)
-                        {
-                            continue;
-                        }
-                        string columnName = protocolInfo.GetParameterName(column.ParameterID);
-                        _columns.Add(new GQIStringColumn(columnName));
-                    }
-                }
-                */
 
                 var table = protocolInfo.FindParameter(Convert.ToInt32(tableId));
 
@@ -122,8 +84,11 @@ namespace GetElementTable_1
             }
             catch (DataMinerElementUnavailableException)
             {
-                // What is the correct type of log for this????
                 throw new DataMinerElementUnavailableException("Unable to reach Element");
+            }
+            catch (FormatException e)
+            {
+                throw new ArgumentException(message: $"Input was not in the correct format. Example: DMA ID: 477, Element ID: 178");
             }
 
             return new OnArgumentsProcessedOutputArgs();
@@ -150,7 +115,6 @@ namespace GetElementTable_1
 
                 var outputConfigTable = GetTable(_dms, elementInfoResponse, Convert.ToInt32(tableId));
                 GetAllLayoutsTableRows(rows, outputConfigTable);
-                CreateDebugRow(rows, "Testing");
             }
             catch (Exception e)
             {
