@@ -215,9 +215,9 @@ namespace GetElementTable_1
                 var deviceAllLayoutsRow = allLayoutsTable[i];
                 var cells = new List<GQICell>();
 
-                for(int j = 0; j < deviceAllLayoutsRow.Length; j++)
+                for (int j = 0; j < deviceAllLayoutsRow.Length; j++)
                 {
-                    cells.Add(new GQICell { Value = Convert.ToString( deviceAllLayoutsRow[j] )});
+                    cells.Add(new GQICell { Value = Convert.ToString(deviceAllLayoutsRow[j]) });
                 }
 
                 var row = new GQIRow(cells.ToArray());
