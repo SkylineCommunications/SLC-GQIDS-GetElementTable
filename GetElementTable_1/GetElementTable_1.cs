@@ -45,11 +45,12 @@ namespace GetElementTable_1
         {
             _columns = new List<GQIColumn>();
 
-            dmaId = args.GetArgumentValue(dmaIdArgument);
-            elementId = args.GetArgumentValue(elementIdArgument);
-            tableId = args.GetArgumentValue(tableIdArgument);
             try
             {
+                dmaId = args.GetArgumentValue(dmaIdArgument);
+                elementId = args.GetArgumentValue(elementIdArgument);
+                tableId = args.GetArgumentValue(tableIdArgument);
+
                 var elementIdMessage = new GetElementByIDMessage
                 {
                     DataMinerID = Convert.ToInt32(dmaId),
@@ -66,29 +67,36 @@ namespace GetElementTable_1
 
                 var table = protocolInfo.FindParameter(Convert.ToInt32(tableId));
 
-                if (table != null && table.IsTable)
+                if (table == null || !table.IsTable)
                 {
-                    var allColumnIds = protocolInfo.FindParameter(Convert.ToInt32(tableId)).TableColumnDefinitions;
+                    throw new InvalidOperationException($"The specified parameter with ID {tableId} is not a valid table or does not exist.");
+                }
 
-                    foreach (var column in allColumnIds)
+                var allColumnIds = table.TableColumnDefinitions;
+
+                foreach (var column in allColumnIds)
+                {
+                    if (column == null)
                     {
-                        if (column == null)
-                        {
-                            continue;
-                        }
-
-                        string columnName = protocolInfo.GetParameterName(column.ParameterID);
-                        _columns.Add(new GQIStringColumn(columnName));
+                        continue; // Skip this iteration if the column is null
                     }
+
+
+                    string columnName = protocolInfo.GetParameterName(column.ParameterID);
+                    _columns.Add(new GQIStringColumn(columnName));
                 }
             }
             catch (DataMinerElementUnavailableException)
             {
-                throw new DataMinerElementUnavailableException("Unable to reach Element");
+                throw new DataMinerElementUnavailableException($"Unable to reach Element with DMA ID: {dmaId} and Element ID: {elementId}");
             }
-            catch (FormatException)
+            catch (FormatException ex)
             {
-                throw new ArgumentException(message: $"Input was not in the correct format. Example: DMA ID: 477, Element ID: 178");
+                throw new FormatException("DMA ID or Element ID was not in the correct format. Example: DMA ID: 477, Element ID: 178, Table ID: 100", ex);
+            }
+            catch (ArgumentNullException ex)
+            {
+                throw new ArgumentNullException("An unexpected error occurred while processing the arguments.", ex);
             }
 
             return new OnArgumentsProcessedOutputArgs();
@@ -116,9 +124,9 @@ namespace GetElementTable_1
                 var outputConfigTable = GetTable(_dms, elementInfoResponse, Convert.ToInt32(tableId));
                 GetAllLayoutsTableRows(rows, outputConfigTable);
             }
-            catch (Exception e)
+            catch (DataMinerElementUnavailableException)
             {
-                CreateDebugRow(rows, $"Exception: {e}");
+                throw new DataMinerElementUnavailableException("Unable to reach Element");
             }
 
             return new GQIPage(rows.ToArray())
@@ -152,13 +160,18 @@ namespace GetElementTable_1
             int length1 = columns.Length;
             int length2 = 0;
             if (length1 > 0)
+            {
                 length2 = columns[0].ArrayValue.Length;
+            }
+
             object[][] objArray;
             if (length1 > 0 && length2 > 0)
             {
                 objArray = new object[length2][];
                 for (int index = 0; index < length2; ++index)
+                {
                     objArray[index] = new object[length1];
+                }
             }
             else
             {
@@ -169,7 +182,9 @@ namespace GetElementTable_1
             {
                 ParameterValue[] arrayValue = columns[index1].ArrayValue;
                 for (int index2 = 0; index2 < length2; ++index2)
+                {
                     objArray[index2][index1] = arrayValue[index2].IsEmpty ? (object)null : arrayValue[index2].ArrayValue[0].InteropValue;
+                }
             }
 
             return objArray;
@@ -177,32 +192,8 @@ namespace GetElementTable_1
 
         private static void CreateDebugRow(List<GQIRow> rows, string message)
         {
-            var debugCells = new[]
-            {
-                new GQICell { Value = message },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-            };
+            var debugCells = Enumerable.Repeat(new GQICell { Value = null}, 23).ToArray();
+            debugCells[0] = new GQICell { Value = message };
 
             var row = new GQIRow(debugCells);
             rows.Add(row);
