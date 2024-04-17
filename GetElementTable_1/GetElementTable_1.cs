@@ -72,26 +72,24 @@ namespace GetElementTable_1
                     throw new InvalidOperationException($"The specified parameter with ID {tableId} is not a valid table or does not exist.");
                 }
 
-                // Use GetParameter instead of TableColumnDefinitions to access the correct parameters and check the Interprete value for double, string, or date.
-
                 var allColumnIds = table.TableColumnDefinitions;
-
-                // allColumnIds GetProtocolInfoResponseMessage -> Parameter (table) -> TableColumnDefinitions -> ParameterID (Column ID) <-- THIS DOES NOT CONTAIN THE TYPE OF THE COLUMN, this CAN be used to find the Column Parameters
-
-                // var columnType = protocolInfo.GetParameter(column.ParameterID.Interprete) ????
-                // check the column type BEFORE adding the columnNAME.
 
                 foreach (var column in allColumnIds)
                 {
                     string columnName = protocolInfo.GetParameterName(column.ParameterID);
                     var columnType = Convert.ToString(protocolInfo.FindParameter(column.ParameterID).InterpreteType);
+                    var columnOptions = Convert.ToString(protocolInfo.FindParameter(column.ParameterID).Options);
 
                     if (column == null)
                     {
                         continue; // Skip this iteration if the column is null
                     }
 
-                    if (columnType == "Double")
+                    if (columnType == "Double" && (columnOptions.Contains("Time") || columnOptions.Contains("Hours")))
+                    {
+                        _columns.Add(new GQIStringColumn(columnName));
+                    }
+                    else if (columnType == "Double")
                     {
                         _columns.Add(new GQIDoubleColumn(columnName));
                     }
@@ -137,7 +135,7 @@ namespace GetElementTable_1
                 var elementInfoResponse = (LiteElementInfoEvent)_dms.SendMessage(getLiteElementInfo);
 
                 var outputConfigTable = GetTable(_dms, elementInfoResponse, Convert.ToInt32(tableId));
-                GetAllLayoutsTableRows(rows, outputConfigTable);
+                GetTableRows(rows, outputConfigTable);
             }
             catch (DataMinerElementUnavailableException)
             {
@@ -205,16 +203,37 @@ namespace GetElementTable_1
             return objArray;
         }
 
-        private static void CreateDebugRow(List<GQIRow> rows, string message)
+        private static string FormatTimeValue(object rawValue)
         {
-            var debugCells = Enumerable.Repeat(new GQICell { Value = null }, 23).ToArray();
-            debugCells[0] = new GQICell { Value = message };
+            double value = Convert.ToDouble(rawValue);
+            switch (value)
+            {
+                case 0:
+                    return "00h";
+                case -1:
+                    return "Missing";
+                default:
+                    if (value > 0)
+                    {
+                        return FormatDuration(value);
+                    }
 
-            var row = new GQIRow(debugCells);
-            rows.Add(row);
+                    break;
+            }
+
+            return Convert.ToString(rawValue);
         }
 
-        private void GetAllLayoutsTableRows(List<GQIRow> rows, object[][] allLayoutsTable)
+        private static string FormatDuration(double time)
+        {
+            int days = (int)(time / 24);
+            int remainingHours = (int)(time % 24);
+            int minutes = (int)((time - (int)time) * 60);
+
+            return $"{days}d {remainingHours}h {minutes}m";
+        }
+
+        private void GetTableRows(List<GQIRow> rows, object[][] allLayoutsTable)
         {
             for (int i = 0; i < allLayoutsTable.Length; i++)
             {
@@ -223,18 +242,25 @@ namespace GetElementTable_1
 
                 for (int j = 0; j < deviceAllLayoutsRow.Length; j++)
                 {
+                    string cellValue = Convert.ToString(deviceAllLayoutsRow[j]);
+                    double numericValue;
+
                     if (_columns[j] is GQIDoubleColumn)
                     {
                         cells.Add(new GQICell { Value = Convert.ToDouble(deviceAllLayoutsRow[j]) });
                     }
+                    else if (double.TryParse(cellValue, out numericValue))
+                    {
+                        string formattedTime = FormatTimeValue(numericValue);
+                        cells.Add(new GQICell { Value = formattedTime });
+                    }
                     else
                     {
-                        cells.Add(new GQICell { Value = Convert.ToString(deviceAllLayoutsRow[j]) });
+                        cells.Add(new GQICell { Value = cellValue });
                     }
                 }
 
                 var row = new GQIRow(cells.ToArray());
-
                 rows.Add(row);
             }
         }
