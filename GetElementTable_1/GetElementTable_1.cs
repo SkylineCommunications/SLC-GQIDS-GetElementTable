@@ -72,18 +72,33 @@ namespace GetElementTable_1
                     throw new InvalidOperationException($"The specified parameter with ID {tableId} is not a valid table or does not exist.");
                 }
 
+                // Use GetParameter instead of TableColumnDefinitions to access the correct parameters and check the Interprete value for double, string, or date.
+
                 var allColumnIds = table.TableColumnDefinitions;
+
+                // allColumnIds GetProtocolInfoResponseMessage -> Parameter (table) -> TableColumnDefinitions -> ParameterID (Column ID) <-- THIS DOES NOT CONTAIN THE TYPE OF THE COLUMN, this CAN be used to find the Column Parameters
+
+                // var columnType = protocolInfo.GetParameter(column.ParameterID.Interprete) ????
+                // check the column type BEFORE adding the columnNAME.
 
                 foreach (var column in allColumnIds)
                 {
+                    string columnName = protocolInfo.GetParameterName(column.ParameterID);
+                    var columnType = Convert.ToString(protocolInfo.FindParameter(column.ParameterID).InterpreteType);
+
                     if (column == null)
                     {
                         continue; // Skip this iteration if the column is null
                     }
 
-
-                    string columnName = protocolInfo.GetParameterName(column.ParameterID);
-                    _columns.Add(new GQIStringColumn(columnName));
+                    if (columnType == "Double")
+                    {
+                        _columns.Add(new GQIDoubleColumn(columnName));
+                    }
+                    else
+                    {
+                        _columns.Add(new GQIStringColumn(columnName));
+                    }
                 }
             }
             catch (DataMinerElementUnavailableException)
@@ -192,7 +207,7 @@ namespace GetElementTable_1
 
         private static void CreateDebugRow(List<GQIRow> rows, string message)
         {
-            var debugCells = Enumerable.Repeat(new GQICell { Value = null}, 23).ToArray();
+            var debugCells = Enumerable.Repeat(new GQICell { Value = null }, 23).ToArray();
             debugCells[0] = new GQICell { Value = message };
 
             var row = new GQIRow(debugCells);
@@ -208,7 +223,14 @@ namespace GetElementTable_1
 
                 for (int j = 0; j < deviceAllLayoutsRow.Length; j++)
                 {
-                    cells.Add(new GQICell { Value = Convert.ToString(deviceAllLayoutsRow[j]) });
+                    if (_columns[j] is GQIDoubleColumn)
+                    {
+                        cells.Add(new GQICell { Value = Convert.ToDouble(deviceAllLayoutsRow[j]) });
+                    }
+                    else
+                    {
+                        cells.Add(new GQICell { Value = Convert.ToString(deviceAllLayoutsRow[j]) });
+                    }
                 }
 
                 var row = new GQIRow(cells.ToArray());
