@@ -76,19 +76,20 @@ namespace GetElementTable_1
 
                 foreach (var column in allColumnIds)
                 {
-                    string columnName = protocolInfo.GetParameterName(column.ParameterID);
-                    var columnType = Convert.ToString(protocolInfo.FindParameter(column.ParameterID).InterpreteType);
-                    var columnOptions = Convert.ToString(protocolInfo.FindParameter(column.ParameterID).Options);
-
                     if (column == null)
                     {
                         continue; // Skip this iteration if the column is null
                     }
 
-                    if (columnType == "Double" && (columnOptions.Contains("Time") || columnOptions.Contains("Hours")))
+                    string columnName = protocolInfo.GetParameterName(column.ParameterID);
+                    var columnType = Convert.ToString(protocolInfo.FindParameter(column.ParameterID).InterpreteType);
+                    var columnOptions = Convert.ToString(protocolInfo.FindParameter(column.ParameterID).Options);
+                    var columnParamType = Convert.ToString(protocolInfo.FindParameter(column.ParameterID).ParameterType);
+
+                    if (columnName.Contains("ID"))
                     {
-                        _columns.Add(new GQIStringColumn(columnName));
-                    }
+                        _columns.Add(new GQIDoubleColumn(columnName));
+                    } 
                     else if (columnType == "Double")
                     {
                         _columns.Add(new GQIDoubleColumn(columnName));
@@ -97,6 +98,19 @@ namespace GetElementTable_1
                     {
                         _columns.Add(new GQIStringColumn(columnName));
                     }
+
+                    //if (columnType == "Double" && (columnOptions.Contains("Time") || columnOptions.Contains("Hours"))) // Adding "None" made it ALMOST work correctly, however PBS column is getting translated to timedate instead of raw number
+                    //{
+                    //    _columns.Add(new GQIStringColumn(columnName));
+                    //}
+                    //else if (columnType == "Double")
+                    //{
+                    //    _columns.Add(new GQIDoubleColumn(columnName));
+                    //}
+                    //else
+                    //{
+                    //    _columns.Add(new GQIStringColumn(columnName));
+                    //}
                 }
             }
             catch (DataMinerElementUnavailableException)
@@ -206,19 +220,17 @@ namespace GetElementTable_1
         private static string FormatTimeValue(object rawValue)
         {
             double value = Convert.ToDouble(rawValue);
-            switch (value)
+            if (value == 0)
             {
-                case 0:
-                    return "00h";
-                case -1:
-                    return "Missing";
-                default:
-                    if (value > 0)
-                    {
-                        return FormatDuration(value);
-                    }
-
-                    break;
+                return "00h";
+            }
+            else if (value == -1)
+            {
+                return "Missing";
+            }
+            else if (value > 0)
+            {
+                return FormatDuration(value);
             }
 
             return Convert.ToString(rawValue);
@@ -231,6 +243,68 @@ namespace GetElementTable_1
             int minutes = (int)((time - (int)time) * 60);
 
             return $"{days}d {remainingHours}h {minutes}m";
+        }
+
+        private void GetTableRows2(List<GQIRow> rows, object[][] table)
+        {
+            for (int i = 0; i < table.Length; i++)
+            {
+                var tableRow = table[i];
+                var cells = new List<GQICell>();
+                double numericValue;
+
+                for (int j = 0; j < tableRow.Length; j++)
+                {
+                    var valueInCell = rows[j];
+                    var columnInfo = tableRow[j] as ParameterInfo;
+                    //if (_columns[j] is GQIDoubleColumn)
+                    //{
+                    //    if(columnInfo.Exceptions.Length > 0 && columnInfo.Exceptions.Any(x => x.Value == Convert.ToString(valueInCell)))
+                    //    {
+                    //        var exceptionInfo = columnInfo.Exceptions.First(x => x.Value == Convert.ToString(valueInCell));
+                    //        cells.Add(new GQICell { Value = valueInCell, DisplayValue = exceptionInfo.Display });
+                    //    }
+                    //    if(columnInfo.Discreets.Length > 0 && columnInfo.Discreets.Any(x => x.Value == Convert.ToString(valueInCell)))
+                    //    {
+                    //        var discreetInfo = columnInfo.Discreets.First(x => x.Value == Convert.ToString(valueInCell));
+                    //        cells.Add(new GQICell { Value= valueInCell, DisplayValue= discreetInfo.Display });
+                    //    }
+                    //}
+                    //else if (_columns[j] is GQIStringColumn)
+                    //{
+                    //    cells.Add(new GQICell { Value = Convert.ToString(valueInCell) });
+                    //}
+
+
+
+
+                    if (_columns[j] is GQIDoubleColumn)
+                    {
+                        if (columnInfo.Exceptions.Length > 0 && columnInfo.Exceptions.Any(x => x.Value == Convert.ToString(valueInCell)))
+                        {
+                            var exceptionInfo = columnInfo.Exceptions.First(x => x.Value == Convert.ToString(valueInCell));
+                            cells.Add(new GQICell { Value = valueInCell, DisplayValue = exceptionInfo.Display});
+                        }
+                        if(columnInfo.Discreets.Length > 0 && columnInfo.Discreets.Any(x => x.Value == Convert.ToString(valueInCell)))
+                        {
+                            var discreetInfo = columnInfo.Discreets.First(x => x.Value == Convert.ToString(valueInCell));
+                            cells.Add(new GQICell { Value = valueInCell, DisplayValue= discreetInfo.Display });
+                        }
+                        else
+                        {
+                            cells.Add(new GQICell { Value = Convert.ToDouble(tableRow[j]) });
+                        }
+                        
+                    }
+                    else
+                    {
+                        cells.Add(new GQICell { Value = valueInCell });
+                    }
+                }
+
+                var row = new GQIRow(cells.ToArray());
+                rows.Add(row);
+            }
         }
 
         private void GetTableRows(List<GQIRow> rows, object[][] allLayoutsTable)
