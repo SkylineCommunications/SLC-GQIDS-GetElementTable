@@ -45,11 +45,12 @@ namespace GetElementTable_1
         {
             _columns = new List<GQIColumn>();
 
-            dmaId = args.GetArgumentValue(dmaIdArgument);
-            elementId = args.GetArgumentValue(elementIdArgument);
-            tableId = args.GetArgumentValue(tableIdArgument);
             try
             {
+                dmaId = args.GetArgumentValue(dmaIdArgument);
+                elementId = args.GetArgumentValue(elementIdArgument);
+                tableId = args.GetArgumentValue(tableIdArgument);
+
                 var elementIdMessage = new GetElementByIDMessage
                 {
                     DataMinerID = Convert.ToInt32(dmaId),
@@ -66,29 +67,63 @@ namespace GetElementTable_1
 
                 var table = protocolInfo.FindParameter(Convert.ToInt32(tableId));
 
-                if (table != null && table.IsTable)
+                if (table == null || !table.IsTable)
                 {
-                    var allColumnIds = protocolInfo.FindParameter(Convert.ToInt32(tableId)).TableColumnDefinitions;
+                    throw new InvalidOperationException($"The specified parameter with ID {tableId} is not a valid table or does not exist.");
+                }
 
-                    foreach (var column in allColumnIds)
+                var allColumnIds = table.TableColumnDefinitions;
+
+                foreach (var column in allColumnIds)
+                {
+                    if (column == null)
                     {
-                        if (column == null)
-                        {
-                            continue;
-                        }
+                        continue; // Skip this iteration if the column is null
+                    }
 
-                        string columnName = protocolInfo.GetParameterName(column.ParameterID);
+                    string columnName = protocolInfo.GetParameterName(column.ParameterID);
+                    var columnType = Convert.ToString(protocolInfo.FindParameter(column.ParameterID).InterpreteType);
+                    var columnOptions = Convert.ToString(protocolInfo.FindParameter(column.ParameterID).Options);
+                    var columnParamType = Convert.ToString(protocolInfo.FindParameter(column.ParameterID).ParameterType);
+
+                    if (columnName.Contains("ID"))
+                    {
+                        _columns.Add(new GQIDoubleColumn(columnName));
+                    } 
+                    else if (columnType == "Double")
+                    {
+                        _columns.Add(new GQIDoubleColumn(columnName));
+                    }
+                    else
+                    {
                         _columns.Add(new GQIStringColumn(columnName));
                     }
+
+                    //if (columnType == "Double" && (columnOptions.Contains("Time") || columnOptions.Contains("Hours"))) // Adding "None" made it ALMOST work correctly, however PBS column is getting translated to timedate instead of raw number
+                    //{
+                    //    _columns.Add(new GQIStringColumn(columnName));
+                    //}
+                    //else if (columnType == "Double")
+                    //{
+                    //    _columns.Add(new GQIDoubleColumn(columnName));
+                    //}
+                    //else
+                    //{
+                    //    _columns.Add(new GQIStringColumn(columnName));
+                    //}
                 }
             }
             catch (DataMinerElementUnavailableException)
             {
-                throw new DataMinerElementUnavailableException("Unable to reach Element");
+                throw new DataMinerElementUnavailableException($"Unable to reach Element with DMA ID: {dmaId} and Element ID: {elementId}");
             }
-            catch (FormatException)
+            catch (FormatException ex)
             {
-                throw new ArgumentException(message: $"Input was not in the correct format. Example: DMA ID: 477, Element ID: 178");
+                throw new FormatException("DMA ID or Element ID was not in the correct format. Example: DMA ID: 477, Element ID: 178, Table ID: 100", ex);
+            }
+            catch (ArgumentNullException ex)
+            {
+                throw new ArgumentNullException("An unexpected error occurred while processing the arguments.", ex);
             }
 
             return new OnArgumentsProcessedOutputArgs();
@@ -114,11 +149,11 @@ namespace GetElementTable_1
                 var elementInfoResponse = (LiteElementInfoEvent)_dms.SendMessage(getLiteElementInfo);
 
                 var outputConfigTable = GetTable(_dms, elementInfoResponse, Convert.ToInt32(tableId));
-                GetAllLayoutsTableRows(rows, outputConfigTable);
+                GetTableRows(rows, outputConfigTable);
             }
-            catch (Exception e)
+            catch (DataMinerElementUnavailableException)
             {
-                CreateDebugRow(rows, $"Exception: {e}");
+                throw new DataMinerElementUnavailableException("Unable to reach Element");
             }
 
             return new GQIPage(rows.ToArray())
@@ -152,13 +187,18 @@ namespace GetElementTable_1
             int length1 = columns.Length;
             int length2 = 0;
             if (length1 > 0)
+            {
                 length2 = columns[0].ArrayValue.Length;
+            }
+
             object[][] objArray;
             if (length1 > 0 && length2 > 0)
             {
                 objArray = new object[length2][];
                 for (int index = 0; index < length2; ++index)
+                {
                     objArray[index] = new object[length1];
+                }
             }
             else
             {
@@ -169,59 +209,132 @@ namespace GetElementTable_1
             {
                 ParameterValue[] arrayValue = columns[index1].ArrayValue;
                 for (int index2 = 0; index2 < length2; ++index2)
+                {
                     objArray[index2][index1] = arrayValue[index2].IsEmpty ? (object)null : arrayValue[index2].ArrayValue[0].InteropValue;
+                }
             }
 
             return objArray;
         }
 
-        private static void CreateDebugRow(List<GQIRow> rows, string message)
+        private static string FormatTimeValue(object rawValue)
         {
-            var debugCells = new[]
+            double value = Convert.ToDouble(rawValue);
+            if (value == 0)
             {
-                new GQICell { Value = message },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-                new GQICell { Value = null },
-            };
+                return "00h";
+            }
+            else if (value == -1)
+            {
+                return "Missing";
+            }
+            else if (value > 0)
+            {
+                return FormatDuration(value);
+            }
 
-            var row = new GQIRow(debugCells);
-            rows.Add(row);
+            return Convert.ToString(rawValue);
         }
 
-        private void GetAllLayoutsTableRows(List<GQIRow> rows, object[][] allLayoutsTable)
+        private static string FormatDuration(double time)
+        {
+            int days = (int)(time / 24);
+            int remainingHours = (int)(time % 24);
+            int minutes = (int)((time - (int)time) * 60);
+
+            return $"{days}d {remainingHours}h {minutes}m";
+        }
+
+        private void GetTableRows2(List<GQIRow> rows, object[][] table)
+        {
+            for (int i = 0; i < table.Length; i++)
+            {
+                var tableRow = table[i];
+                var cells = new List<GQICell>();
+                double numericValue;
+
+                for (int j = 0; j < tableRow.Length; j++)
+                {
+                    var valueInCell = rows[j];
+                    var columnInfo = tableRow[j] as ParameterInfo;
+                    //if (_columns[j] is GQIDoubleColumn)
+                    //{
+                    //    if(columnInfo.Exceptions.Length > 0 && columnInfo.Exceptions.Any(x => x.Value == Convert.ToString(valueInCell)))
+                    //    {
+                    //        var exceptionInfo = columnInfo.Exceptions.First(x => x.Value == Convert.ToString(valueInCell));
+                    //        cells.Add(new GQICell { Value = valueInCell, DisplayValue = exceptionInfo.Display });
+                    //    }
+                    //    if(columnInfo.Discreets.Length > 0 && columnInfo.Discreets.Any(x => x.Value == Convert.ToString(valueInCell)))
+                    //    {
+                    //        var discreetInfo = columnInfo.Discreets.First(x => x.Value == Convert.ToString(valueInCell));
+                    //        cells.Add(new GQICell { Value= valueInCell, DisplayValue= discreetInfo.Display });
+                    //    }
+                    //}
+                    //else if (_columns[j] is GQIStringColumn)
+                    //{
+                    //    cells.Add(new GQICell { Value = Convert.ToString(valueInCell) });
+                    //}
+
+
+
+
+                    if (_columns[j] is GQIDoubleColumn)
+                    {
+                        if (columnInfo.Exceptions.Length > 0 && columnInfo.Exceptions.Any(x => x.Value == Convert.ToString(valueInCell)))
+                        {
+                            var exceptionInfo = columnInfo.Exceptions.First(x => x.Value == Convert.ToString(valueInCell));
+                            cells.Add(new GQICell { Value = valueInCell, DisplayValue = exceptionInfo.Display});
+                        }
+                        if(columnInfo.Discreets.Length > 0 && columnInfo.Discreets.Any(x => x.Value == Convert.ToString(valueInCell)))
+                        {
+                            var discreetInfo = columnInfo.Discreets.First(x => x.Value == Convert.ToString(valueInCell));
+                            cells.Add(new GQICell { Value = valueInCell, DisplayValue= discreetInfo.Display });
+                        }
+                        else
+                        {
+                            cells.Add(new GQICell { Value = Convert.ToDouble(tableRow[j]) });
+                        }
+                        
+                    }
+                    else
+                    {
+                        cells.Add(new GQICell { Value = valueInCell });
+                    }
+                }
+
+                var row = new GQIRow(cells.ToArray());
+                rows.Add(row);
+            }
+        }
+
+        private void GetTableRows(List<GQIRow> rows, object[][] allLayoutsTable)
         {
             for (int i = 0; i < allLayoutsTable.Length; i++)
             {
                 var deviceAllLayoutsRow = allLayoutsTable[i];
                 var cells = new List<GQICell>();
 
-                for(int j = 0; j < deviceAllLayoutsRow.Length; j++)
+                for (int j = 0; j < deviceAllLayoutsRow.Length; j++)
                 {
-                    cells.Add(new GQICell { Value = Convert.ToString( deviceAllLayoutsRow[j] )});
+                    string cellValue = Convert.ToString(deviceAllLayoutsRow[j]);
+                    double numericValue;
+
+                    if (_columns[j] is GQIDoubleColumn)
+                    {
+                        cells.Add(new GQICell { Value = Convert.ToDouble(deviceAllLayoutsRow[j]) });
+                    }
+                    else if (double.TryParse(cellValue, out numericValue))
+                    {
+                        string formattedTime = FormatTimeValue(numericValue);
+                        cells.Add(new GQICell { Value = formattedTime });
+                    }
+                    else
+                    {
+                        cells.Add(new GQICell { Value = cellValue });
+                    }
                 }
 
                 var row = new GQIRow(cells.ToArray());
-
                 rows.Add(row);
             }
         }
